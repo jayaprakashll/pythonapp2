@@ -1,0 +1,176 @@
+name: Build and Update Kubernetes
+
+on:
+
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: python-app
+
+  REGISTRY: ghcr.io
+
+  REPO2: YOUR_GITHUB_USERNAME/pythonapp2
+
+  K8S_FILE: k8s/deployment.yaml
+
+
+jobs:
+
+  build-and-update:
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+
+      # --------------------------------
+      # 1. Checkout Repo 1
+      # --------------------------------
+
+      - name: Checkout Python Application
+        uses: actions/checkout@v4
+
+
+      # --------------------------------
+      # 2. Login to GitHub Container Registry
+      # --------------------------------
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+
+      # --------------------------------
+      # 3. Create Docker tag
+      # --------------------------------
+
+      - name: Set Docker tag
+        run: |
+
+          echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+          echo "Docker tag: ${GITHUB_SHA::7}"
+
+
+      # --------------------------------
+      # 4. Build Docker image
+      # --------------------------------
+
+      - name: Build Docker Image
+        run: |
+
+          docker build \
+            -t $REGISTRY/${{ github.repository_owner }}/$IMAGE_NAME:$IMAGE_TAG \
+            .
+
+
+      # --------------------------------
+      # 5. Push Docker image
+      # --------------------------------
+
+      - name: Push Docker Image
+        run: |
+
+          docker push \
+            $REGISTRY/${{ github.repository_owner }}/$IMAGE_NAME:$IMAGE_TAG
+
+
+      # --------------------------------
+      # 6. Checkout Repo 2
+      # --------------------------------
+
+      - name: Checkout Kubernetes Repository
+        uses: actions/checkout@v4
+
+        with:
+          repository: ${{ env.REPO2 }}
+
+          token: ${{ secrets.REPO2_TOKEN }}
+
+          path: pythonapp2
+
+
+      # --------------------------------
+      # 7. Update Docker tag
+      # --------------------------------
+
+      - name: Update Kubernetes Image
+        run: |
+
+          cd pythonapp2
+
+          python3 - <<'PY'
+
+          import os
+          import re
+
+          file_path = "k8s/deployment.yaml"
+
+          registry = os.environ["REGISTRY"]
+          owner = os.environ["GITHUB_REPOSITORY_OWNER"]
+          image_name = os.environ["IMAGE_NAME"]
+          image_tag = os.environ["IMAGE_TAG"]
+
+          new_image = (
+              f"{registry}/{owner}/{image_name}:{image_tag}"
+          )
+
+          with open(file_path, "r") as file:
+              content = file.read()
+
+          content = re.sub(
+              r"image:\s*.*",
+              f"image: {new_image}",
+              content,
+              count=1
+          )
+
+          with open(file_path, "w") as file:
+              file.write(content)
+
+          print(f"Updated image to: {new_image}")
+
+          PY
+
+
+      # --------------------------------
+      # 8. Commit changes to Repo 2
+      # --------------------------------
+
+      - name: Commit Kubernetes Changes
+        run: |
+
+          cd pythonapp2
+
+          git config user.name "github-actions"
+
+          git config user.email "github-actions@github.com"
+
+          git add k8s/deployment.yaml
+
+          git commit \
+            -m "Update python-app image to ${IMAGE_TAG}" \
+            || echo "No changes to commit"
+
+
+      # --------------------------------
+      # 9. Push changes to Repo 2
+      # --------------------------------
+
+      - name: Push Kubernetes Changes
+        run: |
+
+          cd pythonapp2
+
+          git push
