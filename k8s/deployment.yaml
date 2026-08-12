@@ -20,7 +20,7 @@ spec:
       containers:
         - name: python-app
 
-          image: ghcr.io/YOUR_GITHUB_USERNAME/python-app:initial
+          image: python-app:7364ae1
 
           ports:
             - containerPort: 5000
